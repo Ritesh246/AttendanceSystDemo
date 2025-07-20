@@ -1,87 +1,99 @@
 import streamlit as st
-from deepface import DeepFace
-import pandas as pd
-import numpy as np
 from PIL import Image
+import numpy as np
 import os
-import cv2
+import pandas as pd
 from datetime import datetime
+from deepface import DeepFace
+import cv2
 
 # === CONFIGURATION ===
-KNOWN_PATH = "known_faces"  # rename folder to known_students
-THRESHOLD = 0.4  # DeepFace verification threshold
+KNOWN_PATH = "known_faces"
+THRESHOLD = 0.4  # lower = stricter match
 
-st.set_page_config(page_title="Selfie Attendance", layout="centered")
+# === Streamlit UI ===
 st.title("📸 Selfie-Based Attendance System")
 st.markdown("Take a live selfie OR upload an image to mark attendance. Then download your attendance Excel.")
 
 # === Load known faces ===
+@st.cache_resource
 def load_known_faces():
-    students = []
+    known = []
     for file in os.listdir(KNOWN_PATH):
-        if file.lower().endswith((".jpg", ".jpeg", ".png")):
-            name = os.path.splitext(file)[0]
+        if file.lower().endswith(("jpg", "jpeg", "png")):
             path = os.path.join(KNOWN_PATH, file)
-            students.append({"name": name, "image": path})
-    return students
+            known.append({
+                "name": os.path.splitext(file)[0],
+                "path": path
+            })
+    return known
 
-known_students = load_known_faces()
+known_faces = load_known_faces()
 
-# === Layout: Upload or Capture Image ===
+# === UI Layout ===
 col1, col2 = st.columns(2)
 image_data = None
 
 with col1:
     uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
     if uploaded_file:
-        img = Image.open(uploaded_file)
-        image_data = np.array(img.convert("RGB"))
+        img = Image.open(uploaded_file).convert("RGB")
         st.image(img, caption="Uploaded Image", use_column_width=True)
+        image_data = np.array(img)
 
 with col2:
     captured_image = st.camera_input("📷 Take Image")
     if captured_image:
-        img = Image.open(captured_image)
-        image_data = np.array(img.convert("RGB"))
+        img = Image.open(captured_image).convert("RGB")
         st.image(img, caption="Captured Selfie", use_column_width=True)
+        image_data = np.array(img)
 
-# === Match faces using DeepFace ===
+# === Face Matching Logic ===
 if image_data is not None:
-    st.subheader("🔍 Matching Faces...")
+    st.subheader("🔍 Processing...")
+    matched_names = set()
 
-    temp_path = "temp_group.jpg"
-    cv2.imwrite(temp_path, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
+    try:
+        # Detect faces in the uploaded/captured image
+        faces = DeepFace.extract_faces(img_path=image_data, enforce_detection=False)
 
-    present_students = set()
+        for face in faces:
+            face_img = face["face"]
+            # Save the detected face temporarily
+            cv2.imwrite("temp_face.jpg", cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
-    for student in known_students:
-        try:
-            result = DeepFace.verify(
-                img1_path=student["image"],
-                img2_path=temp_path,
-                enforce_detection=False
-            )
-            if result["verified"] and result["distance"] < THRESHOLD:
-                present_students.add(student["name"])
-                st.success(f"✅ Marked Present: {student['name']}")
-        except Exception as e:
-            st.warning(f"Error verifying {student['name']}: {str(e)}")
+            # Compare with each known face
+            for known in known_faces:
+                result = DeepFace.verify(
+                    img1_path="temp_face.jpg",
+                    img2_path=known["path"],
+                    enforce_detection=False,
+                    model_name='VGG-Face',
+                    distance_metric='cosine'
+                )
 
-    # === Define all students and roll numbers ===
+                if result["verified"] and result["distance"] < THRESHOLD:
+                    matched_names.add(known["name"])
+                    st.success(f"✅ Marked Present: {known['name']}")
+                    break  # stop checking once matched
+
+        os.remove("temp_face.jpg")  # Clean up temp file
+
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+    # === Full Class List ===
     all_students = {
         "Aruna": "A01",
         "Ritesh": "A02",
         "Ishita": "A03",
         "Aai": "A04",
-        "Papa": "A05",
-        "Kaka": "A06"
-        # Add more students here...
+        # Add more if needed
     }
 
-    # === Generate attendance sheet ===
     attendance = []
     for name, roll in all_students.items():
-        status = "Present" if name in present_students else "Absent"
+        status = "Present" if name in matched_names else "Absent"
         attendance.append({"Name": name, "Roll No": roll, "Status": status})
 
     df = pd.DataFrame(attendance)
@@ -91,4 +103,3 @@ if image_data is not None:
 
     with open(filename, "rb") as f:
         st.download_button("📁 Download Attendance Excel", f, file_name=filename)
-
