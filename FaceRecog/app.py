@@ -8,7 +8,7 @@ import cv2
 from datetime import datetime
 
 # === CONFIGURATION ===
-KNOWN_PATH = "known_students"  # rename folder to known_students
+KNOWN_PATH = "known_faces"  # rename folder to known_students
 THRESHOLD = 0.4  # DeepFace verification threshold
 
 st.set_page_config(page_title="Selfie Attendance", layout="centered")
