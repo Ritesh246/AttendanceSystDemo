@@ -1,73 +1,73 @@
-import streamlit as st  # 👉 Streamlit used for UI
-import face_recognition
-import numpy as np
+import streamlit as st
+from deepface import DeepFace
 import pandas as pd
-from datetime import datetime
-import os
+import numpy as np
 from PIL import Image
+import os
+import cv2
+from datetime import datetime
 
 # === CONFIGURATION ===
-KNOWN_PATH = "known_faces"
-TOLERANCE = 0.5 
+KNOWN_PATH = "known_students"  # rename folder to known_students
+THRESHOLD = 0.4  # DeepFace verification threshold
 
-# === Title Heading ===
+st.set_page_config(page_title="Selfie Attendance", layout="centered")
 st.title("📸 Selfie-Based Attendance System")
 st.markdown("Take a live selfie OR upload an image to mark attendance. Then download your attendance Excel.")
 
-# === Load Known Faces ===
-@st.cache_resource
+# === Load known faces ===
 def load_known_faces():
-    known_encodings = []
-    known_names = []
+    students = []
     for file in os.listdir(KNOWN_PATH):
-        img_path = os.path.join(KNOWN_PATH, file)
-        image = face_recognition.load_image_file(img_path)
-        encodings = face_recognition.face_encodings(image)
-        if encodings:
-            known_encodings.append(encodings[0])
-            known_names.append(os.path.splitext(file)[0])
-    return known_encodings, known_names
+        if file.lower().endswith((".jpg", ".jpeg", ".png")):
+            name = os.path.splitext(file)[0]
+            path = os.path.join(KNOWN_PATH, file)
+            students.append({"name": name, "image": path})
+    return students
 
-known_encodings, known_names = load_known_faces()
+known_students = load_known_faces()
 
-# === Layout: Side-by-side buttons ===
+# === Layout: Upload or Capture Image ===
 col1, col2 = st.columns(2)
 image_data = None
 
-# 👉 Upload image button
 with col1:
     uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
     if uploaded_file:
         img = Image.open(uploaded_file)
-        image_data = np.array(img.convert("RGB"))  # ✅ convert PIL to RGB np.array
+        image_data = np.array(img.convert("RGB"))
         st.image(img, caption="Uploaded Image", use_column_width=True)
 
-
-# 👉 Webcam capture button
 with col2:
     captured_image = st.camera_input("📷 Take Image")
     if captured_image:
         img = Image.open(captured_image)
-        image_data = np.array(img.convert("RGB"))  # ✅ convert PIL to RGB np.array
+        image_data = np.array(img.convert("RGB"))
         st.image(img, caption="Captured Selfie", use_column_width=True)
 
-
-# === Process and Generate Attendance ===
+# === Match faces using DeepFace ===
 if image_data is not None:
-    st.subheader("🔍 Processing...")
+    st.subheader("🔍 Matching Faces...")
 
-    face_locations = face_recognition.face_locations(image_data)
-    face_encodings = face_recognition.face_encodings(image_data, face_locations)
-    marked_attendance = set()
+    temp_path = "temp_group.jpg"
+    cv2.imwrite(temp_path, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
 
-    for encoding in face_encodings:
-        matches = face_recognition.compare_faces(known_encodings, encoding, tolerance=TOLERANCE)
-        for i, matched in enumerate(matches):
-            if matched:
-                marked_attendance.add(known_names[i])
-                st.success(f"✅ Marked Present: {known_names[i]}")
+    present_students = set()
 
-    # === Full Student List ===
+    for student in known_students:
+        try:
+            result = DeepFace.verify(
+                img1_path=student["image"],
+                img2_path=temp_path,
+                enforce_detection=False
+            )
+            if result["verified"] and result["distance"] < THRESHOLD:
+                present_students.add(student["name"])
+                st.success(f"✅ Marked Present: {student['name']}")
+        except Exception as e:
+            st.warning(f"Error verifying {student['name']}: {str(e)}")
+
+    # === Define all students and roll numbers ===
     all_students = {
         "Aruna": "A01",
         "Ritesh": "A02",
@@ -78,15 +78,13 @@ if image_data is not None:
         # Add more students here...
     }
 
-    # === Prepare Excel Data ===
+    # === Generate attendance sheet ===
     attendance = []
     for name, roll in all_students.items():
-        status = "Present" if name in marked_attendance else "Absent"
+        status = "Present" if name in present_students else "Absent"
         attendance.append({"Name": name, "Roll No": roll, "Status": status})
 
     df = pd.DataFrame(attendance)
-
-    # === Save and Offer Excel Download ===
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"attendance_{timestamp}.xlsx"
     df.to_excel(filename, index=False)
