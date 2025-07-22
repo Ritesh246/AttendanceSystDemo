@@ -4,3 +4,4 @@ deepface==0.0.79
 pillow==9.5.0
 pandas
 
+
