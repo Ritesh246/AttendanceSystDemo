@@ -1,7 +1,7 @@
 services:
   - type: web
-    name: attendance-system
+    name: attendance-syst-demo
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port 10000
-    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "streamlit run app.py"
+    pythonVersion: 3.10.13
