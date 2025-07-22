@@ -1,8 +1,0 @@
-streamlit==1.35.0
-opencv-python-headless==4.10.0.82
-deepface==0.0.79
-pillow==9.5.0
-pandas
-openpyxl
-
-
